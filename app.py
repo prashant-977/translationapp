@@ -45,9 +45,7 @@ def literary_refine(source_lang_name: str, target_lang_name: str, source_text: s
 
     text = llm_tokenizer.decode(out[0], skip_special_tokens=True)
 
-    # The decode includes the prompt + answer in some templates.
-    # A simple, robust trick: take everything after the last user message.
-    # But easiest: just extract the last chunk after the prompt.
+    # Extract only the generated part after the input prompt
     answer = text[len(llm_tokenizer.decode(inputs["input_ids"][0], skip_special_tokens=True)):]
     answer = answer.strip()
 
@@ -65,8 +63,7 @@ LANGS = {
     "Nepali": "npi_Deva",
 }
 
-# Load NLLB translation pipeline once.
-# device=-1 means CPU, device=0 means GPU if available.
+# Use GPU if available
 DEVICE = 0 if torch.cuda.is_available() else -1
 
 nllb_translator = pipeline(
@@ -79,19 +76,6 @@ def nllb_translate(text: str, src_code: str, tgt_code: str) -> str:
     # NLLB pipeline expects src_lang/tgt_lang in call kwargs for many setups
     out = nllb_translator(text, src_lang=src_code, tgt_lang=tgt_code, max_length=512)
     return out[0]["translation_text"]
-
-
-# -----------------------------
-# 2) Literary LLM setup (options)
-# -----------------------------
-# Option A (beginner, local): use a smaller instruction model that can run on CPU/GPU.
-# Option B (recommended if you have no GPU): use an API (OpenAI/others) instead.
-#
-# Below is a placeholder "literary_refine" that you can implement with:
-# - a local chat model via transformers
-# - or an API call
-#
-# For now we’ll implement a simple “fallback”: if no LLM is configured, return the draft.
 
 USE_LLM = True  # flip to True after you implement literary_refine properly
 
