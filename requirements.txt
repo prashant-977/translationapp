@@ -1,0 +1,8 @@
+gradio
+transformers
+torch
+sentencepiece
+accelerate
+safetensors
+openai
+

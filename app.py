@@ -1,0 +1,167 @@
+import gradio as gr
+from transformers import pipeline
+import torch
+from prompts import LITERARY_SYSTEM, literary_user_prompt
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from openai import OpenAI
+client = OpenAI()
+
+LITERARY_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+
+# CPU-friendly loading
+llm_tokenizer = AutoTokenizer.from_pretrained(LITERARY_MODEL, use_fast=True)
+llm_model = AutoModelForCausalLM.from_pretrained(
+    LITERARY_MODEL,
+    device_map="cpu",          # force CPU for a laptop
+    torch_dtype=torch.float32  # safest on CPU
+)
+llm_model.eval()
+
+def literary_refine(source_lang_name: str, target_lang_name: str, source_text: str, draft_translation: str) -> str:
+    user_msg = literary_user_prompt(source_lang_name, target_lang_name, source_text, draft_translation)
+
+    messages = [
+        {"role": "system", "content": LITERARY_SYSTEM},
+        {"role": "user", "content": user_msg},
+    ]
+
+    # Qwen chat template formats messages properly
+    prompt = llm_tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+
+    inputs = llm_tokenizer(prompt, return_tensors="pt")
+
+    with torch.no_grad():
+        out = llm_model.generate(
+            **inputs,
+            max_new_tokens=256,     # bump to 512 for longer passages
+            do_sample=False,        # deterministic
+            temperature=0.0,
+            repetition_penalty=1.05
+        )
+
+    text = llm_tokenizer.decode(out[0], skip_special_tokens=True)
+
+    # The decode includes the prompt + answer in some templates.
+    # A simple, robust trick: take everything after the last user message.
+    # But easiest: just extract the last chunk after the prompt.
+    answer = text[len(llm_tokenizer.decode(inputs["input_ids"][0], skip_special_tokens=True)):]
+    answer = answer.strip()
+
+    # Safety fallback: if extraction fails, return the draft
+    return answer if answer else draft_translation
+
+
+# -----------------------------
+# 1) NLLB setup
+# -----------------------------
+NLLB_MODEL = "facebook/nllb-200-distilled-600M"
+
+LANGS = {
+    "English": "eng_Latn",
+    "Nepali": "npi_Deva",
+}
+
+# Load NLLB translation pipeline once.
+# device=-1 means CPU, device=0 means GPU if available.
+DEVICE = 0 if torch.cuda.is_available() else -1
+
+nllb_translator = pipeline(
+    "translation",
+    model=NLLB_MODEL,
+    device=DEVICE,
+)
+
+def nllb_translate(text: str, src_code: str, tgt_code: str) -> str:
+    # NLLB pipeline expects src_lang/tgt_lang in call kwargs for many setups
+    out = nllb_translator(text, src_lang=src_code, tgt_lang=tgt_code, max_length=512)
+    return out[0]["translation_text"]
+
+
+# -----------------------------
+# 2) Literary LLM setup (options)
+# -----------------------------
+# Option A (beginner, local): use a smaller instruction model that can run on CPU/GPU.
+# Option B (recommended if you have no GPU): use an API (OpenAI/others) instead.
+#
+# Below is a placeholder "literary_refine" that you can implement with:
+# - a local chat model via transformers
+# - or an API call
+#
+# For now we’ll implement a simple “fallback”: if no LLM is configured, return the draft.
+
+USE_LLM = True  # flip to True after you implement literary_refine properly
+
+def literary_refine(source_lang_name: str, target_lang_name: str, source_text: str, draft_translation: str) -> str:
+    user_msg = literary_user_prompt(source_lang_name, target_lang_name, source_text, draft_translation)
+
+    # Responses API call (recommended for new projects)
+    resp = client.responses.create(
+        model="gpt-5.1-mini",  # good quality/price; you can change later
+        input=[
+            {"role": "system", "content": LITERARY_SYSTEM},
+            {"role": "user", "content": user_msg},
+        ],
+    )
+
+    # The SDK provides output_text for the “just give me text” use case
+    refined = (resp.output_text or "").strip()
+    return refined if refined else draft_translation
+
+# -----------------------------
+# 3) App function (Fast vs Literary)
+# -----------------------------
+def translate_app(text: str, src_lang: str, tgt_lang: str, mode: str, show_both: bool):
+    if not text or not text.strip():
+        return "" if not show_both else ("", "")
+
+    src_code = LANGS[src_lang]
+    tgt_code = LANGS[tgt_lang]
+
+    draft = nllb_translate(text, src_code, tgt_code)
+
+    if mode == "Fast":
+        final = draft
+    else:
+        final = literary_refine(src_lang, tgt_lang, text, draft)
+
+    if show_both:
+        return draft, final
+    return final
+
+
+# -----------------------------
+# 4) Gradio UI
+# -----------------------------
+with gr.Blocks(title="Nepali ↔ English Translator") as demo:
+    gr.Markdown("# Nepali ↔ English Translation (Fast vs Literary)")
+    gr.Markdown("Fast = direct model translation. Literary = draft + stylistic refinement.")
+
+    with gr.Row():
+        src_lang = gr.Dropdown(choices=list(LANGS.keys()), value="English", label="Source")
+        tgt_lang = gr.Dropdown(choices=list(LANGS.keys()), value="Nepali", label="Target")
+
+    mode = gr.Radio(choices=["Fast", "Literary"], value="Fast", label="Mode")
+    show_both = gr.Checkbox(value=False, label="Show both draft and final")
+
+    inp = gr.Textbox(lines=8, label="Input Text", placeholder="Paste text here...")
+
+    out_single = gr.Textbox(lines=8, label="Translation")
+    out_draft = gr.Textbox(lines=8, label="Draft (NLLB)")
+    out_final = gr.Textbox(lines=8, label="Final (Literary)")
+
+    def route_outputs(text, s, t, m, both):
+        result = translate_app(text, s, t, m, both)
+        if both:
+            draft, final = result
+            return gr.update(visible=False, value=""), gr.update(visible=True, value=draft), gr.update(visible=True, value=final)
+        else:
+            return gr.update(visible=True, value=result), gr.update(visible=False, value=""), gr.update(visible=False, value="")
+
+    btn = gr.Button("Translate")
+    btn.click(route_outputs, inputs=[inp, src_lang, tgt_lang, mode, show_both], outputs=[out_single, out_draft, out_final])
+
+demo.launch()
