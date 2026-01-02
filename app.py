@@ -63,7 +63,8 @@ LANGS = {
     "Nepali": "npi_Deva",
 }
 
-# Use GPU if available
+# Load NLLB translation pipeline once.
+# device=-1 means CPU, device=0 means GPU if available.
 DEVICE = 0 if torch.cuda.is_available() else -1
 
 nllb_translator = pipeline(
@@ -76,6 +77,11 @@ def nllb_translate(text: str, src_code: str, tgt_code: str) -> str:
     # NLLB pipeline expects src_lang/tgt_lang in call kwargs for many setups
     out = nllb_translator(text, src_lang=src_code, tgt_lang=tgt_code, max_length=512)
     return out[0]["translation_text"]
+
+
+# -----------------------------
+# 2) Literary LLM setup
+# -----------------------------
 
 USE_LLM = True  # flip to True after you implement literary_refine properly
 
