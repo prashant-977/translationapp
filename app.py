@@ -1,8 +1,3 @@
-TOTAL_INPUT_TOKENS = 0
-TOTAL_OUTPUT_TOKENS = 0
-TOTAL_TOKENS = 0
-API_CALLS = 0
-
 import gradio as gr
 from transformers import pipeline
 import torch
@@ -23,38 +18,39 @@ llm_model = AutoModelForCausalLM.from_pretrained(
 llm_model.eval()
 
 def literary_refine(source_lang_name: str, target_lang_name: str, source_text: str, draft_translation: str) -> str:
-    global TOTAL_INPUT_TOKENS, TOTAL_OUTPUT_TOKENS, TOTAL_TOKENS, API_CALLS
-
     user_msg = literary_user_prompt(source_lang_name, target_lang_name, source_text, draft_translation)
 
-    resp = client.responses.create(
-        model="gpt-5.1-mini",
-        input=[
-            {"role": "system", "content": LITERARY_SYSTEM},
-            {"role": "user", "content": user_msg},
-        ],
+    messages = [
+        {"role": "system", "content": LITERARY_SYSTEM},
+        {"role": "user", "content": user_msg},
+    ]
+
+    # Qwen chat template formats messages properly
+    prompt = llm_tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
     )
 
-    refined = (resp.output_text or "").strip()
+    inputs = llm_tokenizer(prompt, return_tensors="pt")
 
-    # ---- usage logging ----
-    usage = getattr(resp, "usage", None)
-    if usage:
-        API_CALLS += 1
-        in_tok = getattr(usage, "input_tokens", 0) or 0
-        out_tok = getattr(usage, "output_tokens", 0) or 0
-        tot_tok = getattr(usage, "total_tokens", 0) or (in_tok + out_tok)
-
-        TOTAL_INPUT_TOKENS += in_tok
-        TOTAL_OUTPUT_TOKENS += out_tok
-        TOTAL_TOKENS += tot_tok
-
-        print(
-            f"[OpenAI usage] input={in_tok} output={out_tok} total={tot_tok} | "
-            f"session totals: calls={API_CALLS}, input={TOTAL_INPUT_TOKENS}, output={TOTAL_OUTPUT_TOKENS}, total={TOTAL_TOKENS}"
+    with torch.no_grad():
+        out = llm_model.generate(
+            **inputs,
+            max_new_tokens=256,     # bump to 512 for longer passages
+            do_sample=False,        # deterministic
+            temperature=0.0,
+            repetition_penalty=1.05
         )
 
-    return refined if refined else draft_translation
+    text = llm_tokenizer.decode(out[0], skip_special_tokens=True)
+
+    # Extract only the generated part after the input prompt
+    answer = text[len(llm_tokenizer.decode(inputs["input_ids"][0], skip_special_tokens=True)):]
+    answer = answer.strip()
+
+    # Safety fallback: if extraction fails, return the draft
+    return answer if answer else draft_translation
 
 
 # -----------------------------
@@ -119,12 +115,13 @@ def translate_app(text: str, src_lang: str, tgt_lang: str, mode: str, show_both:
 
     if mode == "Fast":
         final = draft
-    else:  # Literary only
+    else:
         final = literary_refine(src_lang, tgt_lang, text, draft)
 
     if show_both:
         return draft, final
     return final
+
 
 # -----------------------------
 # 4) Gradio UI
