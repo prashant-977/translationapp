@@ -126,32 +126,58 @@ def translate_app(text: str, src_lang: str, tgt_lang: str, mode: str, show_both:
 # -----------------------------
 # 4) Gradio UI
 # -----------------------------
-with gr.Blocks(title="Nepali ↔ English Translator") as demo:
-    gr.Markdown("# Nepali ↔ English Translation (Fast vs Literary)")
-    gr.Markdown("Fast = direct model translation. Literary = draft + stylistic refinement.")
+with gr.Blocks(title="Nepali ↔ English Translator (Side-by-Side)") as demo:
+    gr.Markdown("# Nepali ↔ English Translator")
+    gr.Markdown("Fast = NLLB translation, Literary = optional refined rewrite.")
 
+    # Input row
+    input_text = gr.Textbox(
+        label="Input Text",
+        placeholder="Enter text here...",
+        lines=6
+    )
+
+    # Options
     with gr.Row():
-        src_lang = gr.Dropdown(choices=list(LANGS.keys()), value="English", label="Source")
-        tgt_lang = gr.Dropdown(choices=list(LANGS.keys()), value="Nepali", label="Target")
+        src_lang = gr.Dropdown(list(LANGS.keys()), value="English", label="Source")
+        tgt_lang = gr.Dropdown(list(LANGS.keys()), value="Nepali", label="Target")
 
-    mode = gr.Radio(choices=["Fast", "Literary"], value="Fast", label="Mode")
-    show_both = gr.Checkbox(value=False, label="Show both draft and final")
+    use_literary = gr.Checkbox(
+        label="Enable Literary Rewrite (slower)",
+        value=False
+    )
 
-    inp = gr.Textbox(lines=8, label="Input Text", placeholder="Paste text here...")
+    # Output side-by-side
+    with gr.Row():
+        out_nllb = gr.Textbox(
+            label="NLLB Translation (Accurate)",
+            lines=8,
+            interactive=False
+        )
+        out_literary = gr.Textbox(
+            label="Literary Rewrite (if enabled)",
+            lines=8,
+            interactive=False
+        )
 
-    out_single = gr.Textbox(lines=8, label="Translation")
-    out_draft = gr.Textbox(lines=8, label="Draft (NLLB)")
-    out_final = gr.Textbox(lines=8, label="Final (Literary)")
+    translate_btn = gr.Button("Translate")
 
-    def route_outputs(text, s, t, m, both):
-        result = translate_app(text, s, t, m, both)
-        if both:
-            draft, final = result
-            return gr.update(visible=False, value=""), gr.update(visible=True, value=draft), gr.update(visible=True, value=final)
+    def side_by_side_translate(text, s, t, use_lit):
+        if not text or not text.strip():
+            return "", ""
+        # 1) Always NLLB draft
+        draft = nllb_translate(text, LANGS[s], LANGS[t])
+        # 2) Only run LLM if enabled
+        if use_lit:
+            refined = literary_refine(s, t, text, draft)
         else:
-            return gr.update(visible=True, value=result), gr.update(visible=False, value=""), gr.update(visible=False, value="")
+            refined = ""
+        return draft, refined
 
-    btn = gr.Button("Translate")
-    btn.click(route_outputs, inputs=[inp, src_lang, tgt_lang, mode, show_both], outputs=[out_single, out_draft, out_final])
+    translate_btn.click(
+        side_by_side_translate,
+        inputs=[input_text, src_lang, tgt_lang, use_literary],
+        outputs=[out_nllb, out_literary]
+    )
 
 demo.launch()
