@@ -8,3 +8,6 @@ __pycache__/
 
 # Secrets
 .env
+
+prompts.py
+ab_feedback.csv

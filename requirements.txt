@@ -1,8 +1,6 @@
 gradio
-transformers
 torch
+transformers>=4.35,<4.60
+huggingface-hub>=0.34,<1.0
 sentencepiece
 accelerate
-safetensors
-openai
-
