@@ -1,11 +1,13 @@
 import gradio as gr
 from transformers import pipeline
 import torch
+import datetime
+import csv
+import os
 from prompts import LITERARY_SYSTEM, literary_user_prompt
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from openai import OpenAI
 client = OpenAI()
-
 LITERARY_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 
 # CPU-friendly loading
@@ -122,6 +124,26 @@ def translate_app(text: str, src_lang: str, tgt_lang: str, mode: str, show_both:
         return draft, final
     return final
 
+# -----------------------------
+# LOGGING FUNCTION
+# -----------------------------
+FEEDBACK_FILE = "ab_feedback.csv"
+
+def log_ab_feedback(choice, src_lang, tgt_lang):
+    file_exists = os.path.isfile(FEEDBACK_FILE)
+
+    with open(FEEDBACK_FILE, "a", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(["timestamp", "choice", "source_lang", "target_lang"])
+        writer.writerow([
+            datetime.datetime.utcnow().isoformat(),
+            choice,
+            src_lang,
+            tgt_lang
+        ])
+
+    return "Feedback recorded. Thank you!"
 
 # -----------------------------
 # 4) Gradio UI
@@ -174,10 +196,38 @@ with gr.Blocks(title="Nepali ↔ English Translator (Side-by-Side)") as demo:
             refined = ""
         return draft, refined
 
+        gr.Markdown("### Which output do you prefer?")
+
+    with gr.Row():
+        btn_nllb = gr.Button("👍 Prefer NLLB")
+        btn_llm = gr.Button("👍 Prefer Literary")
+        btn_tie = gr.Button("🤝 Tie")
+    
+    feedback_status = gr.Textbox(
+        label="Feedback status",
+        interactive=False
+    )
+
     translate_btn.click(
         side_by_side_translate,
         inputs=[input_text, src_lang, tgt_lang, use_literary],
         outputs=[out_nllb, out_literary]
     )
+
+    btn_nllb.click(
+        fn=lambda s=src_lang.value, t=tgt_lang.value: log_ab_feedback("NLLB", s, t),
+        outputs=feedback_status
+    )
+    
+    btn_llm.click(
+        fn=lambda s=src_lang.value, t=tgt_lang.value: log_ab_feedback("LITERARY", s, t),
+        outputs=feedback_status
+    )
+    
+    btn_tie.click(
+        fn=lambda s=src_lang.value, t=tgt_lang.value: log_ab_feedback("TIE", s, t),
+        outputs=feedback_status
+    )
+
 
 demo.launch()
