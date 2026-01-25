@@ -42,16 +42,16 @@ LLaMA 3.2 Literary Rewrite
 
 .
 ├── app.py # Gradio UI
+|
 ├── translation.py # NLLB translation logic
+|
 ├── literary.py # LLaMA literary rewrite
+|
 ├── feedback.py # Feedback logging (CSV)
+|
 ├── requirements.txt
+|
 └── README.md
-
-
----
-
-## Run Locally (Linux / macOS)
 
 ### 1️⃣ Clone the repository
 
@@ -68,6 +68,20 @@ source .venv/bin/activate
 
 pip install --upgrade pip
 pip install -r requirements.txt
+
+### Local Setup
+
+    Set your Hugging Face token (required for LLaMA 3.2):
+
+    export HF_TOKEN="YOUR_HUGGINGFACE_TOKEN"
+
+
+    Run the app:
+
+    python app.py
+
+
+Open the Gradio interface in your browser.
 
 4️⃣ Hugging Face login (required for LLaMA)
 
@@ -136,3 +150,11 @@ Performance Notes
     NLLB translation remains fast
 
     LLaMA rewrite runs only when enabled
+
+Notes
+
+Literary refinement always outputs Nepali (Devanagari script)
+
+For local runs, each user must provide their own HF_TOKEN with access to gated models
+
+Feedback is logged locally to ab_feedback.csv
